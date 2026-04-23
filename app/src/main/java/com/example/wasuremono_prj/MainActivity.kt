@@ -11,9 +11,7 @@ import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,6 +33,8 @@ import org.tensorflow.lite.support.image.ImageProcessor
 import org.tensorflow.lite.support.image.TensorImage
 import org.tensorflow.lite.support.image.ops.ResizeOp
 import org.tensorflow.lite.support.metadata.MetadataExtractor
+
+
 class MainActivity : ComponentActivity() {
 
     private var interpreter: Interpreter? = null
@@ -54,8 +54,8 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
-        private const val MODEL_PATH = "ssdmobilenetv1.tflite"
-        private const val LABEL_PATH = "labels.txt"
+        private const val MODEL_PATH = "ssdmobilenetv3.tflite"
+        private const val LABEL_PATH = "labelmap.txt"
         private const val CONFIDENCE_THRESHOLD = 0.5f
     }
 
@@ -93,29 +93,33 @@ class MainActivity : ComponentActivity() {
     private fun initLiteRT() {
         try {
             val model = FileUtil.loadMappedFile(this, MODEL_PATH)
-            interpreter = Interpreter(model, Interpreter.Options().setNumThreads(4))
 
+            val options = Interpreter.Options().apply {
+                useXNNPACK=true
+                setNumThreads(4)
+
+            }
+            interpreter = Interpreter(model, options)
             val extractor = MetadataExtractor(model)
 
             // metadataにlabelがあるか確認
-            val files = extractor.associatedFileNames
-            Log.d("LiteRT", "Associated files: $files")
-            if(MODEL_PATH=="ssdmobilenetv1.tflite"){
-                if (files.contains("labelmap.txt")) {
-                    val inputStream = extractor.getAssociatedFile("labelmap.txt")
-                    labels = inputStream.bufferedReader().readLines()
-                } else {
-                    Log.e("LiteRT", "labelmap.txt not found in metadata")
-                    labels = emptyList()
-                }
+            try {
+                labels = this.assets.open(LABEL_PATH).bufferedReader().readLines()
+                Log.d("LiteRT", "Loaded labels from assets: ${labels.size}")
+            } catch (e: Exception) {
+                Log.e("LiteRT", "Failed to load labels from assets: ${e.message}")
             }
-            else if(MODEL_PATH=="ssdmobilenetv3.tflite"){
-                if (files.contains("labels.txt")) {
-                    val inputStream = extractor.getAssociatedFile("labelmap.txt")
+
+            // 2. もし assets になくて、メタデータにある場合に備えたバックアップ（現在の処理）
+            if (labels.isEmpty()) {
+                val extractor = MetadataExtractor(model)
+                val files = extractor.associatedFileNames
+                val labelFileName = if (MODEL_PATH.contains("v1")) "labelmap.txt" else "labelmap.txt"
+
+                if (files.contains(labelFileName)) {
+                    val inputStream = extractor.getAssociatedFile(labelFileName)
                     labels = inputStream.bufferedReader().readLines()
-                } else {
-                    Log.e("LiteRT", "labelmap.txt not found in metadata")
-                    labels = emptyList()
+                    Log.d("LiteRT", "Loaded labels from metadata: ${labels.size}")
                 }
             }
 
@@ -156,18 +160,19 @@ class MainActivity : ComponentActivity() {
                 val bitmap = imageProxy.toBitmap()
                 val interp = interpreter
 
+
                 if (bitmap != null && interp != null) {
-                    val processor = ImageProcessor.Builder()
-                        .add(ResizeOp(300, 300, ResizeOp.ResizeMethod.BILINEAR))
+                    val targetSize = if (MODEL_PATH == "ssdmobilenetv1.tflite") 300 else 320
+                    val processor = ImageProcessor.Builder().add(ResizeOp(targetSize, targetSize, ResizeOp.ResizeMethod.BILINEAR))
                         .build()
 
                     var tensor = TensorImage(interp.getInputTensor(0).dataType())
                     tensor.load(bitmap)
                     tensor = processor.process(tensor)
 
-                    val locations = Array(1) { Array(10) { FloatArray(4) } }
-                    val classes = Array(1) { FloatArray(10) }
-                    val scores = Array(1) { FloatArray(10) }
+                    val locations = Array(1) { Array(100) { FloatArray(4) } }
+                    val classes = Array(1) { FloatArray(100) }
+                    val scores = Array(1) { FloatArray(100) }
                     val num = FloatArray(1)
 
                     val outputs = mapOf(
@@ -191,6 +196,8 @@ class MainActivity : ComponentActivity() {
                             val label = labels.getOrNull(classes[0][i].toInt()) ?: "Unknown"
                             result.add(Detection(label, score, locations[0][i]))
                         }
+                        val classIndex = classes[0][i].toInt()
+                        Log.d("LiteRT", "ClassIndex: $classIndex, LabelsSize: ${labels.size}")
                     }
 
                     val now = System.currentTimeMillis()
@@ -202,6 +209,7 @@ class MainActivity : ComponentActivity() {
                         detections.addAll(result)
                         fps = currentFps
                     }
+
                 }
                 imageProxy.close()
             }
@@ -225,9 +233,15 @@ class MainActivity : ComponentActivity() {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val previewWidth = size.width
                 val previewHeight = size.height
-
+                val inputSize = 0f
 // 入力画像サイズ（modelに入れたサイズ）
-                val inputSize = 300f
+                if(MODEL_PATH=="ssdmobilenetv1.tflite"){
+                    val inputSize = 300f
+                }
+                else if(MODEL_PATH=="ssdmobilenetv3.tflite"){
+                    val inputSize = 320f
+                }
+
 
 // スケール（centerCrop）
                 val scale = maxOf(
