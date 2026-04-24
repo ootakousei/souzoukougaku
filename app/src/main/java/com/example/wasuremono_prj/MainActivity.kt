@@ -233,39 +233,38 @@ class MainActivity : ComponentActivity() {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val previewWidth = size.width
                 val previewHeight = size.height
-                val inputSize = 0f
-// 入力画像サイズ（modelに入れたサイズ）
-                if(MODEL_PATH=="ssdmobilenetv1.tflite"){
-                    val inputSize = 300f
-                }
-                else if(MODEL_PATH=="ssdmobilenetv3.tflite"){
-                    val inputSize = 320f
-                }
+                val modelInputSize = if (MODEL_PATH == "ssdmobilenetv1.tflite") 300f else 320f
 
+                // スケール計算（回転を考慮し、縦横の対応を逆転させる）
+                val scaleX = previewWidth / modelInputSize
+                val scaleY = previewHeight / modelInputSize
+                // CenterCrop用のスケール
+                val scale = maxOf(scaleX, scaleY)
 
-// スケール（centerCrop）
-                val scale = maxOf(
-                    previewWidth / inputSize,
-                    previewHeight / inputSize
-                )
+                val offsetX = (previewWidth - modelInputSize * scale) / 2f
+                val offsetY = (previewHeight - modelInputSize * scale) / 2f
 
-// クロップで削られるオフセット
-                val dx = (previewWidth - inputSize * scale) / 2f
-                val dy = (previewHeight - inputSize * scale) / 2f
+                detections.forEach { detection ->
+                    val box = detection.box
 
-                detections.forEach {
-                    val box = it.box
+                    // --- 90度回転の座標変換 ---
+                    // 通常のSSD出力: box[0]=top, box[1]=left, box[2]=bottom, box[3]=right
+                    // これを縦画面（90度回転）に合わせると：
+                    // 新しいLeft   = (1.0 - bottom)
+                    // 新しいTop    = left
+                    // 新しいRight  = (1.0 - top)
+                    // 新しいBottom = right
 
-                    val left = box[1] * inputSize * scale + dx
-                    val top = box[0] * inputSize * scale + dy
-                    val right = box[3] * inputSize * scale + dx
-                    val bottom = box[2] * inputSize * scale + dy
+                    val left = (1.0f - box[2]) * modelInputSize * scale + offsetX
+                    val top = box[1] * modelInputSize * scale + offsetY
+                    val right = (1.0f - box[0]) * modelInputSize * scale + offsetX
+                    val bottom = box[3] * modelInputSize * scale + offsetY
 
                     drawRect(
                         color = Color.Red,
                         topLeft = Offset(left, top),
                         size = Size(right - left, bottom - top),
-                        style = Stroke(width = 4f)
+                        style = Stroke(width = 8f)
                     )
                 }
             }
