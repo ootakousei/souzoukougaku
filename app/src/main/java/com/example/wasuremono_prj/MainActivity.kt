@@ -33,6 +33,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         checkCameraPermission()
+        if (!hasPermission) {
+            requestPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
 
         setContent {
             Wasuremono_prjTheme {
@@ -42,21 +45,24 @@ class MainActivity : ComponentActivity() {
                     DetectorScreen()
                 } else {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("カメラ権限が必要です")
+                        Text("カメラの権限が必要です")
                     }
                 }
             }
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        checkCameraPermission()
+    }
+
     private fun checkCameraPermission() {
         if (ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.CAMERA
-            ) != PackageManager.PERMISSION_GRANTED
+            ) == PackageManager.PERMISSION_GRANTED
         ) {
-            requestPermissionLauncher.launch(Manifest.permission.CAMERA)
-        } else {
             hasPermission = true;
         }
     }
